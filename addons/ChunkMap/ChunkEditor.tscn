@@ -1,8 +1,10 @@
-[gd_scene load_steps=2 format=2]
+[gd_scene load_steps=3 format=2]
 
 [ext_resource path="res://addons/ChunkMap/ChunkEditor.gd" type="Script" id=1]
+[ext_resource path="res://Assets/Graphics/tileset_a.tres" type="TileSet" id=2]
 
 [node name="ChunkEditor" type="TileMap"]
-cell_size = Vector2( 32, 32 )
+tile_set = ExtResource( 2 )
+cell_size = Vector2( 16, 16 )
 format = 1
 script = ExtResource( 1 )
