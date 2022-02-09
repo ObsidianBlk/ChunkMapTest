@@ -8,3 +8,4 @@ tile_set = ExtResource( 2 )
 cell_size = Vector2( 16, 16 )
 format = 1
 script = ExtResource( 1 )
+chunk_path = "res://Assets/Chunks"

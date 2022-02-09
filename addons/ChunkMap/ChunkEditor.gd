@@ -19,7 +19,9 @@ export (int, 1, 10) var chunk_distance : int = 4			setget set_chunk_distance
 # -------------------------------------------------------------------------
 var _chunks : Dictionary = {}
 var _active_chunk_pos : Vector2 = Vector2.ZERO
-var _ignore_chunk_set : bool = false
+var _clear_editor_on_move : bool = true
+var _save_timer : Timer = null
+var _save_triggered : bool = false
 
 # -------------------------------------------------------------------------
 # Onready Variables
@@ -40,16 +42,27 @@ func set_chunk_distance(cd : int) -> void:
 # Override Methods
 # -------------------------------------------------------------------------
 func _ready() -> void:
+	clear()
+	_save_timer = Timer.new()
+	_save_timer.autostart = true
+	_save_timer.one_shot = false
+	_save_timer.wait_time = 10.0
+	add_child(_save_timer)
+	_save_timer.connect("timeout", self, "_on_save_timer_timeout")
+	_save_timer.start()
 	_LoadInsideChunks(_active_chunk_pos)
 
 func _draw() -> void:
-	print("Updating")
-	for pos in _chunks.keys():
-		print("Chunk: ", _chunks[pos].node, " | Cell Count: ", _chunks[pos].node.get_used_cells().size())
 	var chunk_size : Vector2 = CHUNK_SIZE * cell_size 
 	var r : Rect2 = Rect2(_active_chunk_pos * chunk_size, chunk_size)
 	draw_rect(r, Color(0.0, 0.4, 1.0), false, 3)
 
+func _process(_delta : float) -> void:
+	# Only trigger a save if one has been triggered and we're not drawing.
+	if _save_triggered and _clear_editor_on_move:
+		_SaveDirtyChunks()
+		_save_triggered = false
+		_UnloadOutsideChunks(_active_chunk_pos)
 
 # -------------------------------------------------------------------------
 # Plugin Methods
@@ -61,20 +74,22 @@ func _tool_unhandled_input(event) -> bool:
 		var chunk_pos = (mpos / chunk_size).floor()
 #		)
 		if chunk_pos != _active_chunk_pos:
-			if _active_chunk_pos in _chunks:
-				print("Clearing")
-				_ClearChunkArea(_active_chunk_pos)
-				#.clear()
-			if chunk_pos in _chunks:
-				_CopyChunkToEditor(chunk_pos)
+			if _clear_editor_on_move:
+				if _active_chunk_pos in _chunks:
+					.clear()
+				if chunk_pos in _chunks:
+					_CopyChunkToEditor(chunk_pos)
 			_active_chunk_pos = chunk_pos
-			#_UnloadOutsideChunks(_active_chunk_pos)
-			#_LoadInsideChunks(_active_chunk_pos)
-			#update()
+			_UnloadOutsideChunks(_active_chunk_pos)
+			_LoadInsideChunks(_active_chunk_pos)
+			update()
 	elif event is InputEventMouseButton:
-		if not event.pressed:
-			for pos in _chunks.keys():
-				print("Chunk: ", _chunks[pos].node, " | Cell Count: ", _chunks[pos].node.get_used_cells().size())
+		if event.pressed and event.button_index == BUTTON_LEFT:
+			_clear_editor_on_move = false
+		elif not event.pressed and event.button_index == BUTTON_LEFT:
+			.clear()
+			_CopyChunkToEditor(_active_chunk_pos)
+			_clear_editor_on_move = true
 	return false
 	
 # -------------------------------------------------------------------------
@@ -97,6 +112,7 @@ func _IsChunkLoaded(chunk_name : String) -> bool:
 	return false
 
 func _UnloadOutsideChunks(chunk_pos : Vector2) -> void:
+	print("Unloading chunks")
 	var xmin = chunk_pos.x - chunk_distance
 	var xmax = chunk_pos.x + chunk_distance
 	var ymin = chunk_pos.y - chunk_distance
@@ -113,6 +129,7 @@ func _UnloadOutsideChunks(chunk_pos : Vector2) -> void:
 			_chunks.erase(cpos)
 
 func _LoadInsideChunks(chunk_pos : Vector2) -> void:
+	print("Loading chunks")
 	if chunk_path == "":
 		return # Without a base path to check, there's nothing to load.
 	
@@ -177,11 +194,9 @@ func _SaveDirtyChunks() -> void:
 func _ClearChunkArea(chunk_pos : Vector2) -> void:
 	var cpos_x : float = chunk_pos.x * CHUNK_SIZE.x
 	var cpos_y : float = chunk_pos.y * CHUNK_SIZE.y
-	_ignore_chunk_set = true
 	for y in range(cpos_y, cpos_y + CHUNK_SIZE.y):
 		for x in range(cpos_x, cpos_x + CHUNK_SIZE.x):
 			.set_cell(x, y, -1)
-	_ignore_chunk_set = false
 
 
 func _CopyChunkToEditor(chunk_pos : Vector2) -> void:
@@ -202,25 +217,30 @@ func _CopyChunkToEditor(chunk_pos : Vector2) -> void:
 # -------------------------------------------------------------------------
 # Public Methods
 # -------------------------------------------------------------------------
+
 func set_cell(x : int, y : int, tile : int, flip_x : bool = false, flip_y : bool = false, transpose : bool = false, autotile_coord : Vector2 = Vector2(0, 0)) -> void:
-	if not _ignore_chunk_set:
-		var cpos : Vector2 = (Vector2(x, y) / CHUNK_SIZE).floor()
-		if not cpos in _chunks:
-			#print("Creating chunk at position: ", cpos)
-			var tm : TileMap = _CreateChunkAtPosition(cpos)
-			if not tm:
-				print("Failed to create new chunk")
-				return
-			_StoreChunkNode(cpos, tm)
-			add_child(tm)
-		
-		if cpos in _chunks:
-			#print("Setting Chunk Tile: ", cpos)
-			_chunks[cpos].node.set_cell(x, y, tile, flip_x, flip_y, transpose, autotile_coord)
-			_chunks[cpos].node.modulate = Color(1,1,1,0.75)
-			_chunks[cpos].dirty = true
+	print("Setting Cell: ", x, ",", y)
+	var cpos : Vector2 = (Vector2(x, y) / CHUNK_SIZE).floor()
+	if not cpos in _chunks:
+		#print("Creating chunk at position: ", cpos)
+		var tm : TileMap = _CreateChunkAtPosition(cpos)
+		if not tm:
+			print("Failed to create new chunk")
+			return
+		_StoreChunkNode(cpos, tm)
+		add_child(tm)
+	
+	if cpos in _chunks:
+		#print("Setting Chunk Tile: ", cpos)
+		_chunks[cpos].node.set_cell(x, y, tile, flip_x, flip_y, transpose, autotile_coord)
+		_chunks[cpos].node.modulate = Color(1,1,1,0.75)
+		_chunks[cpos].dirty = true
 	.set_cell(x, y, tile, flip_x, flip_y, transpose, autotile_coord)
 
 # -------------------------------------------------------------------------
 # Handler Methods
 # -------------------------------------------------------------------------
+
+func _on_save_timer_timeout() -> void:
+	print("Save Ping")
+	_save_triggered = true
